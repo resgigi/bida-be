@@ -1,0 +1,10 @@
+module.exports = {
+  ROLES: {
+    SUPER_ADMIN: 'SUPER_ADMIN',
+    MANAGER: 'MANAGER',
+    STAFF: 'STAFF',
+  },
+  JWT_EXPIRES_IN: '15m',
+  JWT_REFRESH_EXPIRES_IN: '7d',
+  PAGINATION_DEFAULT_LIMIT: 20,
+};

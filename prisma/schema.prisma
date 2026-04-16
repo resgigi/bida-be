@@ -1,0 +1,156 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  SUPER_ADMIN
+  MANAGER
+  STAFF
+}
+
+enum RoomStatus {
+  AVAILABLE
+  IN_USE
+  MAINTENANCE
+}
+
+enum RoomType {
+  NORMAL
+  VIP
+  TAKEAWAY
+}
+
+enum SessionStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  CASH
+  TRANSFER
+  CARD
+}
+
+model User {
+  id           String        @id @default(cuid())
+  username     String        @unique
+  password     String
+  fullName     String
+  role         Role          @default(STAFF)
+  isActive     Boolean       @default(true)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  sessions     Session[]
+  auditLogs    AuditLog[]
+  dailyReports DailyReport[]
+}
+
+model Room {
+  id           String     @id @default(cuid())
+  name         String
+  description  String     @default("")
+  pricePerHour Int
+  status       RoomStatus @default(AVAILABLE)
+  type         RoomType   @default(NORMAL)
+  sortOrder    Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  sessions     Session[]
+}
+
+model Session {
+  id              String        @id @default(cuid())
+  roomId          String
+  room            Room          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  staffId         String
+  staff           User          @relation(fields: [staffId], references: [id])
+  startTime       DateTime      @default(now())
+  endTime         DateTime?
+  totalPlayAmount Int           @default(0)
+  totalFoodAmount Int           @default(0)
+  discountAmount  Int           @default(0)
+  discountPercent Int           @default(0)
+  totalAmount     Int           @default(0)
+  paidAmount      Int           @default(0)
+  paymentMethod   PaymentMethod @default(CASH)
+  status          SessionStatus @default(ACTIVE)
+  note            String        @default("")
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+  orderItems      OrderItem[]
+}
+
+model Category {
+  id        String    @id @default(cuid())
+  name      String
+  code      String    @unique
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  products  Product[]
+}
+
+model Product {
+  id         String      @id @default(cuid())
+  name       String
+  code       String      @unique
+  categoryId String
+  category   Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  price      Int
+  stock      Int         @default(0)
+  imageUrl   String      @default("")
+  isActive   Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  orderItems OrderItem[]
+}
+
+model OrderItem {
+  id         String   @id @default(cuid())
+  sessionId  String
+  session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id])
+  quantity   Int
+  unitPrice  Int
+  totalPrice Int
+  createdAt  DateTime @default(now())
+}
+
+model DailyReport {
+  id               String   @id @default(cuid())
+  reportDate       DateTime
+  totalSessions    Int      @default(0)
+  totalRevenue     Int      @default(0)
+  totalPlayRevenue Int      @default(0)
+  totalFoodRevenue Int      @default(0)
+  totalDiscount    Int      @default(0)
+  createdById      String
+  createdBy        User     @relation(fields: [createdById], references: [id])
+  createdAt        DateTime @default(now())
+
+  @@unique([reportDate])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String   @default("")
+  details   String   @default("{}")
+  createdAt DateTime @default(now())
+}
+
+model Setting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+}
