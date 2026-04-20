@@ -19,6 +19,7 @@ exports.deleteAllSessions = async (req, res) => {
     const count = await prisma.session.count();
     await prisma.orderItem.deleteMany({});
     await prisma.session.deleteMany({});
+    await prisma.auditLog.deleteMany({ where: { entity: 'Session' } });
     await prisma.room.updateMany({ data: { status: 'AVAILABLE' } });
     await logAction(req.user.id, 'DELETE_ALL', 'Session', '', { count });
     return success(res, { deletedCount: count }, `Đã xóa ${count} phiên chơi`);

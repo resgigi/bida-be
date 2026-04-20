@@ -2,11 +2,53 @@ const prisma = require('../../config/database');
 const { success, error } = require('../../utils/response');
 const { logAction } = require('../../utils/audit');
 
+function parseAuditDetails(details) {
+  try {
+    return JSON.parse(details || '{}');
+  } catch {
+    return {};
+  }
+}
+
+function normalizeRoomAction(log) {
+  return {
+    id: log.id,
+    action: log.action,
+    createdAt: log.createdAt,
+    by: log.user?.fullName || log.user?.username || 'N/A',
+    details: parseAuditDetails(log.details),
+  };
+}
+
+const SESSION_STATUSES = ['ACTIVE', 'PAYMENT_REQUESTED', 'COMPLETED', 'CANCELLED'];
+
 exports.getAll = async (req, res) => {
   try {
-    const { status, roomId, from, to, search, page = 1, limit = 20 } = req.query;
+    const {
+      status,
+      statusIn,
+      closed,
+      roomId,
+      from,
+      to,
+      search,
+      roomAction = '',
+      roomActionBy = '',
+      page = 1,
+      limit = 20,
+    } = req.query;
     const where = {};
-    if (status) where.status = status;
+    const statusInRaw = statusIn && String(statusIn).trim();
+    if (statusInRaw) {
+      const parts = statusInRaw.split(',').map((s) => s.trim()).filter(Boolean);
+      const valid = parts.filter((p) => SESSION_STATUSES.includes(p));
+      if (valid.length > 0) where.status = { in: valid };
+      else where.id = { in: ['__NO_MATCH__'] };
+    } else if (String(closed) === '1') {
+      where.status = { in: ['COMPLETED', 'CANCELLED'] };
+    } else if (status) {
+      where.status = status;
+    }
     if (roomId) where.roomId = roomId;
     if (from || to) {
       where.createdAt = {};
@@ -24,6 +66,35 @@ exports.getAll = async (req, res) => {
         { room: { name: { contains: q, mode: 'insensitive' } } },
       ];
     }
+    if (roomAction || roomActionBy.trim()) {
+      let actionFilter = null;
+      if (roomAction === 'HAS_ACTION') actionFilter = { in: ['CANCEL_SESSION', 'TRANSFER_ROOM'] };
+      if (roomAction === 'CANCELLED_ONLY') actionFilter = 'CANCEL_SESSION';
+      if (roomAction === 'TRANSFER_ONLY') actionFilter = 'TRANSFER_ROOM';
+
+      const actorKeyword = roomActionBy.trim();
+      const actionRows = await prisma.auditLog.findMany({
+        where: {
+          entity: 'Session',
+          action: actionFilter || { in: ['CANCEL_SESSION', 'TRANSFER_ROOM'] },
+          ...(actorKeyword
+            ? {
+              user: {
+                OR: [
+                  { fullName: { contains: actorKeyword, mode: 'insensitive' } },
+                  { username: { contains: actorKeyword, mode: 'insensitive' } },
+                ],
+              },
+            }
+            : {}),
+        },
+        select: { entityId: true },
+        distinct: ['entityId'],
+      });
+      const sessionIds = actionRows.map((row) => row.entityId).filter(Boolean);
+      where.id = sessionIds.length > 0 ? { in: sessionIds } : { in: ['__NO_MATCH__'] };
+    }
+
     const take = Math.min(Number(limit) || 20, 100);
     const skip = (Number(page) - 1) * take;
     const [sessions, total] = await Promise.all([
@@ -40,7 +111,32 @@ exports.getAll = async (req, res) => {
       }),
       prisma.session.count({ where }),
     ]);
-    return success(res, { sessions, total, page: Number(page), limit: take });
+
+    const sessionIds = sessions.map((s) => s.id);
+    const logs = sessionIds.length > 0
+      ? await prisma.auditLog.findMany({
+        where: {
+          entity: 'Session',
+          entityId: { in: sessionIds },
+          action: { in: ['CANCEL_SESSION', 'TRANSFER_ROOM'] },
+        },
+        include: { user: { select: { fullName: true, username: true } } },
+        orderBy: { createdAt: 'desc' },
+      })
+      : [];
+
+    const actionsBySession = logs.reduce((acc, log) => {
+      if (!acc[log.entityId]) acc[log.entityId] = [];
+      acc[log.entityId].push(normalizeRoomAction(log));
+      return acc;
+    }, {});
+
+    const sessionsWithActions = sessions.map((s) => ({
+      ...s,
+      roomActions: actionsBySession[s.id] || [],
+    }));
+
+    return success(res, { sessions: sessionsWithActions, total, page: Number(page), limit: take });
   } catch (err) {
     return error(res, err.message);
   }
@@ -70,7 +166,21 @@ exports.getById = async (req, res) => {
       },
     });
     if (!session) return error(res, 'Phiên không tồn tại', 404);
-    return success(res, session);
+
+    const roomActionLogs = await prisma.auditLog.findMany({
+      where: {
+        entity: 'Session',
+        entityId: session.id,
+        action: { in: ['CANCEL_SESSION', 'TRANSFER_ROOM'] },
+      },
+      include: { user: { select: { fullName: true, username: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return success(res, {
+      ...session,
+      roomActions: roomActionLogs.map(normalizeRoomAction),
+    });
   } catch (err) {
     return error(res, err.message);
   }
@@ -180,6 +290,113 @@ exports.requestPayment = async (req, res) => {
     }
 
     return success(res, requested, 'Đã gửi yêu cầu thanh toán');
+  } catch (err) {
+    return error(res, err.message);
+  }
+};
+
+exports.cancelSession = async (req, res) => {
+  try {
+    const reason = String(req.body?.reason || '').trim();
+    if (!reason) return error(res, 'Vui lòng nhập lý do hủy phòng', 400);
+
+    const session = await prisma.session.findUnique({
+      where: { id: req.params.id },
+      include: { room: true, orderItems: true },
+    });
+    if (!session) return error(res, 'Phiên không tồn tại', 404);
+    if (session.status === 'COMPLETED') return error(res, 'Phiên đã thanh toán, không thể hủy', 400);
+    if (session.status === 'CANCELLED') return error(res, 'Phiên đã hủy trước đó', 400);
+
+    const endTime = session.endTime || new Date();
+    const durationMs = endTime - new Date(session.startTime);
+    const durationHours = durationMs / (1000 * 60 * 60);
+    const totalPlayAmount = Math.round(durationHours * session.room.pricePerHour);
+    const totalFoodAmount = session.orderItems.reduce((sum, item) => sum + item.totalPrice, 0);
+
+    const cancelled = await prisma.session.update({
+      where: { id: req.params.id },
+      data: {
+        endTime,
+        totalPlayAmount,
+        totalFoodAmount,
+        totalAmount: 0,
+        paidAmount: 0,
+        status: 'CANCELLED',
+      },
+      include: { room: true, staff: { select: { id: true, fullName: true } }, orderItems: { include: { product: true } } },
+    });
+
+    await prisma.room.update({ where: { id: session.roomId }, data: { status: 'AVAILABLE' } });
+    await logAction(req.user.id, 'CANCEL_SESSION', 'Session', session.id, {
+      roomName: session.room?.name,
+      previousStatus: session.status,
+      totalPlayAmount,
+      totalFoodAmount,
+      reason,
+    });
+
+    if (req.app.get('io')) {
+      req.app.get('io').emit('room:updated', { roomId: session.roomId, status: 'AVAILABLE' });
+      req.app.get('io').emit('session:cancelled', cancelled);
+    }
+
+    return success(res, cancelled, 'Đã hủy phiên và trả phòng về trạng thái trống');
+  } catch (err) {
+    return error(res, err.message);
+  }
+};
+
+exports.transferRoom = async (req, res) => {
+  try {
+    const { targetRoomId } = req.body;
+    const reason = String(req.body?.reason || '').trim();
+    if (!targetRoomId) return error(res, 'Vui lòng chọn phòng cần chuyển đến', 400);
+    if (!reason) return error(res, 'Vui lòng nhập lý do chuyển phòng', 400);
+
+    const session = await prisma.session.findUnique({
+      where: { id: req.params.id },
+      include: { room: true, orderItems: true },
+    });
+    if (!session) return error(res, 'Phiên không tồn tại', 404);
+    if (session.status !== 'ACTIVE') {
+      return error(res, 'Chỉ chuyển phòng khi phiên đang hoạt động', 400);
+    }
+    if (session.roomId === targetRoomId) {
+      return error(res, 'Phòng chuyển đến trùng với phòng hiện tại', 400);
+    }
+
+    const targetRoom = await prisma.room.findUnique({ where: { id: targetRoomId } });
+    if (!targetRoom) return error(res, 'Phòng chuyển đến không tồn tại', 404);
+    if (targetRoom.status === 'MAINTENANCE') return error(res, 'Phòng chuyển đến đang bảo trì', 400);
+    if (targetRoom.status !== 'AVAILABLE') return error(res, 'Phòng chuyển đến không còn trống', 400);
+
+    const transferred = await prisma.$transaction(async (tx) => {
+      await tx.room.update({ where: { id: session.roomId }, data: { status: 'AVAILABLE' } });
+      await tx.room.update({ where: { id: targetRoomId }, data: { status: 'IN_USE' } });
+      return tx.session.update({
+        where: { id: session.id },
+        data: { roomId: targetRoomId },
+        include: { room: true, staff: { select: { id: true, fullName: true } }, orderItems: { include: { product: true } } },
+      });
+    });
+
+    await logAction(req.user.id, 'TRANSFER_ROOM', 'Session', session.id, {
+      fromRoomId: session.roomId,
+      fromRoomName: session.room?.name,
+      toRoomId: targetRoomId,
+      toRoomName: targetRoom.name,
+      keptOrderItems: session.orderItems.length,
+      reason,
+    });
+
+    if (req.app.get('io')) {
+      req.app.get('io').emit('room:updated', { roomId: session.roomId, status: 'AVAILABLE' });
+      req.app.get('io').emit('room:updated', { roomId: targetRoomId, status: 'IN_USE' });
+      req.app.get('io').emit('session:transferred', transferred);
+    }
+
+    return success(res, transferred, 'Chuyển phòng thành công, đã giữ nguyên giờ chơi và món đã gọi');
   } catch (err) {
     return error(res, err.message);
   }
