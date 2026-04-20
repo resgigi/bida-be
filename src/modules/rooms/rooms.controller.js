@@ -13,7 +13,7 @@ exports.getAll = async (req, res) => {
       orderBy: { sortOrder: 'asc' },
       include: {
         sessions: {
-          where: { status: 'ACTIVE' },
+          where: { status: { in: ['ACTIVE', 'PAYMENT_REQUESTED'] } },
           include: { orderItems: { include: { product: true } }, staff: { select: { fullName: true } } },
         },
       },
@@ -30,7 +30,7 @@ exports.getById = async (req, res) => {
       where: { id: req.params.id },
       include: {
         sessions: {
-          where: { status: 'ACTIVE' },
+          where: { status: { in: ['ACTIVE', 'PAYMENT_REQUESTED'] } },
           include: { orderItems: { include: { product: true } }, staff: { select: { fullName: true } } },
         },
       },
@@ -72,7 +72,9 @@ exports.remove = async (req, res) => {
   try {
     const room = await prisma.room.findUnique({ where: { id: req.params.id } });
     if (!room) return error(res, 'Phòng không tồn tại', 404);
-    const activeSessions = await prisma.session.count({ where: { roomId: req.params.id, status: 'ACTIVE' } });
+    const activeSessions = await prisma.session.count({
+      where: { roomId: req.params.id, status: { in: ['ACTIVE', 'PAYMENT_REQUESTED'] } },
+    });
     if (activeSessions > 0) return error(res, 'Không thể xóa phòng đang có phiên chơi', 400);
     await prisma.room.delete({ where: { id: req.params.id } });
     await logAction(req.user.id, 'DELETE', 'Room', req.params.id, { name: room.name });

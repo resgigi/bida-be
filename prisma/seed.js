@@ -8,6 +8,7 @@ async function main() {
 
   const adminPassword = await bcrypt.hash('admin123', 10);
   const managerPassword = await bcrypt.hash('manager123', 10);
+  const cashierPassword = await bcrypt.hash('cashier123', 10);
   const staffPassword = await bcrypt.hash('staff123', 10);
 
   await prisma.user.upsert({
@@ -19,6 +20,11 @@ async function main() {
     where: { username: 'manager' },
     update: {},
     create: { username: 'manager', password: managerPassword, fullName: 'Quản Lý', role: 'MANAGER' },
+  });
+  await prisma.user.upsert({
+    where: { username: 'cashier1' },
+    update: {},
+    create: { username: 'cashier1', password: cashierPassword, fullName: 'Thu Ngân 1', role: 'CASHIER' },
   });
   await prisma.user.upsert({
     where: { username: 'staff1' },
@@ -99,9 +105,10 @@ async function main() {
   await prisma.setting.upsert({ where: { key: 'storeName' }, update: { value: 'KARAOKE LASVEGAS 434' }, create: { key: 'storeName', value: 'KARAOKE LASVEGAS 434' } });
   await prisma.setting.upsert({ where: { key: 'storeAddress' }, update: {}, create: { key: 'storeAddress', value: '' } });
   await prisma.setting.upsert({ where: { key: 'storePhone' }, update: {}, create: { key: 'storePhone', value: '' } });
+  await prisma.setting.upsert({ where: { key: 'stockManagementEnabled' }, update: {}, create: { key: 'stockManagementEnabled', value: 'true' } });
 
   console.log('Seed completed!');
-  console.log('Accounts: admin/admin123, manager/manager123, staff1/staff123');
+  console.log('Accounts: admin/admin123, manager/manager123, cashier1/cashier123, staff1/staff123');
 }
 
 main()

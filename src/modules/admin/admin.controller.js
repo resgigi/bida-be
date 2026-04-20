@@ -130,6 +130,13 @@ exports.getSettings = async (_req, res) => {
 
 exports.updateSettings = async (req, res) => {
   try {
+    if (
+      Object.prototype.hasOwnProperty.call(req.body, 'stockManagementEnabled')
+      && req.user.role !== 'SUPER_ADMIN'
+    ) {
+      return error(res, 'Chỉ Admin tổng mới được thay đổi cài đặt quản lý tồn kho', 403);
+    }
+
     const entries = Object.entries(req.body);
     for (const [key, value] of entries) {
       await prisma.setting.upsert({

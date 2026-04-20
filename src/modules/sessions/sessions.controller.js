@@ -49,7 +49,7 @@ exports.getAll = async (req, res) => {
 exports.getAssignableStaff = async (_req, res) => {
   try {
     const users = await prisma.user.findMany({
-      where: { isActive: true, role: { in: ['STAFF', 'MANAGER', 'SUPER_ADMIN'] } },
+      where: { isActive: true, role: { in: ['STAFF', 'CASHIER', 'MANAGER', 'SUPER_ADMIN'] } },
       select: { id: true, fullName: true, username: true, role: true },
       orderBy: { fullName: 'asc' },
     });
@@ -90,7 +90,7 @@ exports.startSession = async (req, res) => {
         return error(res, 'Nhân viên chỉ được chọn chính mình làm người phụ trách', 403);
       }
       const assignee = await prisma.user.findFirst({
-        where: { id: bodyStaffId, isActive: true, role: { in: ['STAFF', 'MANAGER', 'SUPER_ADMIN'] } },
+        where: { id: bodyStaffId, isActive: true, role: { in: ['STAFF', 'CASHIER', 'MANAGER', 'SUPER_ADMIN'] } },
       });
       if (!assignee) return error(res, 'Nhân viên phụ trách không hợp lệ', 400);
       staffId = bodyStaffId;
@@ -141,10 +141,8 @@ exports.endSession = async (req, res) => {
   }
 };
 
-exports.checkout = async (req, res) => {
+exports.requestPayment = async (req, res) => {
   try {
-    const { discountAmount = 0, discountPercent = 0, paidAmount, paymentMethod = 'CASH', note = '' } = req.body;
-
     const session = await prisma.session.findUnique({
       where: { id: req.params.id },
       include: { room: true, orderItems: true },
@@ -156,6 +154,59 @@ exports.checkout = async (req, res) => {
     const durationMs = endTime - new Date(session.startTime);
     const durationHours = durationMs / (1000 * 60 * 60);
     const totalPlayAmount = Math.round(durationHours * session.room.pricePerHour);
+    const totalFoodAmount = session.orderItems.reduce((sum, item) => sum + item.totalPrice, 0);
+
+    const requested = await prisma.session.update({
+      where: { id: req.params.id },
+      data: {
+        endTime,
+        totalPlayAmount,
+        totalFoodAmount,
+        status: 'PAYMENT_REQUESTED',
+        paymentRequestedBy: req.user.id,
+        paymentRequestedAt: new Date(),
+      },
+      include: { room: true, staff: { select: { id: true, fullName: true } }, orderItems: { include: { product: true } } },
+    });
+
+    await logAction(req.user.id, 'REQUEST_PAYMENT', 'Session', session.id, {
+      roomName: requested.room?.name,
+      totalPlayAmount,
+      totalFoodAmount,
+    });
+
+    if (req.app.get('io')) {
+      req.app.get('io').emit('session:payment-requested', requested);
+    }
+
+    return success(res, requested, 'Đã gửi yêu cầu thanh toán');
+  } catch (err) {
+    return error(res, err.message);
+  }
+};
+
+exports.checkout = async (req, res) => {
+  try {
+    const { discountAmount = 0, discountPercent = 0, paidAmount, paymentMethod = 'CASH', note = '', playAmountOverride } = req.body;
+
+    const session = await prisma.session.findUnique({
+      where: { id: req.params.id },
+      include: { room: true, orderItems: true },
+    });
+    if (!session) return error(res, 'Phiên không tồn tại', 404);
+    if (session.status === 'COMPLETED') return error(res, 'Phiên đã thanh toán', 400);
+    if (session.status !== 'PAYMENT_REQUESTED') {
+      return error(res, 'Phiên chưa được yêu cầu thanh toán', 400);
+    }
+
+    const endTime = session.endTime || new Date();
+    const durationMs = endTime - new Date(session.startTime);
+    const durationHours = durationMs / (1000 * 60 * 60);
+    let totalPlayAmount = Math.round(durationHours * session.room.pricePerHour);
+    if (playAmountOverride !== undefined && playAmountOverride !== null && playAmountOverride !== '') {
+      const safeOverride = Math.max(0, Math.round(Number(playAmountOverride)));
+      if (Number.isFinite(safeOverride)) totalPlayAmount = safeOverride;
+    }
     const totalFoodAmount = session.orderItems.reduce((sum, item) => sum + item.totalPrice, 0);
 
     let finalDiscount = discountAmount;
@@ -176,13 +227,18 @@ exports.checkout = async (req, res) => {
         paidAmount: paidAmount || totalAmount,
         paymentMethod,
         status: 'COMPLETED',
+        approvedBy: req.user.id,
         note,
       },
       include: { room: true, staff: { select: { id: true, fullName: true } }, orderItems: { include: { product: true } } },
     });
 
     await prisma.room.update({ where: { id: session.roomId }, data: { status: 'AVAILABLE' } });
-    await logAction(req.user.id, 'CHECKOUT', 'Session', session.id, { totalAmount, paymentMethod });
+    await logAction(req.user.id, 'CHECKOUT', 'Session', session.id, {
+      totalAmount,
+      paymentMethod,
+      playAmountOverride: playAmountOverride !== undefined ? playAmountOverride : undefined,
+    });
 
     if (req.app.get('io')) {
       req.app.get('io').emit('room:updated', { roomId: session.roomId, status: 'AVAILABLE' });
