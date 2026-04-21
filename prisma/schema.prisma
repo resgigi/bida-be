@@ -76,6 +76,7 @@ model Product {
   categoryId String
   price      Int
   stock      Int         @default(0)
+  trackStock Boolean     @default(true)
   imageUrl   String      @default("")
   isActive   Boolean     @default(true)
   createdAt  DateTime    @default(now())

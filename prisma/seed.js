@@ -77,6 +77,24 @@ async function main() {
     create: { name: 'Bida phụ kiện', code: 'BD', sortOrder: 3 },
   });
 
+  await prisma.setting.upsert({ where: { key: 'storeName' }, update: { value: 'KARAOKE LASVEGAS 434' }, create: { key: 'storeName', value: 'KARAOKE LASVEGAS 434' } });
+  await prisma.setting.upsert({ where: { key: 'storeAddress' }, update: {}, create: { key: 'storeAddress', value: '' } });
+  await prisma.setting.upsert({ where: { key: 'storePhone' }, update: {}, create: { key: 'storePhone', value: '' } });
+  await prisma.setting.upsert({ where: { key: 'stockManagementEnabled' }, update: {}, create: { key: 'stockManagementEnabled', value: 'true' } });
+
+  const stockSetting = await prisma.setting.findUnique({ where: { key: 'stockManagementEnabled' } });
+  const defaultTrackStock = String(stockSetting?.value ?? 'true').toLowerCase() === 'true';
+
+  const migratedFlag = await prisma.setting.findUnique({ where: { key: 'productTrackStockMigrated' } });
+  if (!migratedFlag || migratedFlag.value !== '1') {
+    await prisma.product.updateMany({ data: { trackStock: defaultTrackStock } });
+    await prisma.setting.upsert({
+      where: { key: 'productTrackStockMigrated' },
+      update: { value: '1' },
+      create: { key: 'productTrackStockMigrated', value: '1' },
+    });
+  }
+
   const products = [
     { name: 'Bia Tiger', code: 'DU001', categoryId: catDoUong.id, price: 20000, stock: 100 },
     { name: 'Bia Heineken', code: 'DU002', categoryId: catDoUong.id, price: 25000, stock: 100 },
@@ -98,14 +116,9 @@ async function main() {
     await prisma.product.upsert({
       where: { code: p.code },
       update: {},
-      create: p,
+      create: { ...p, trackStock: defaultTrackStock },
     });
   }
-
-  await prisma.setting.upsert({ where: { key: 'storeName' }, update: { value: 'KARAOKE LASVEGAS 434' }, create: { key: 'storeName', value: 'KARAOKE LASVEGAS 434' } });
-  await prisma.setting.upsert({ where: { key: 'storeAddress' }, update: {}, create: { key: 'storeAddress', value: '' } });
-  await prisma.setting.upsert({ where: { key: 'storePhone' }, update: {}, create: { key: 'storePhone', value: '' } });
-  await prisma.setting.upsert({ where: { key: 'stockManagementEnabled' }, update: {}, create: { key: 'stockManagementEnabled', value: 'true' } });
 
   console.log('Seed completed!');
   console.log('Accounts: admin/admin123, manager/manager123, cashier1/cashier123, staff1/staff123');

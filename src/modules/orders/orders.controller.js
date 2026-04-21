@@ -1,12 +1,6 @@
 const prisma = require('../../config/database');
 const { success, error } = require('../../utils/response');
 
-async function isStockManagementEnabled() {
-  const setting = await prisma.setting.findUnique({ where: { key: 'stockManagementEnabled' } });
-  if (!setting) return true;
-  return String(setting.value).toLowerCase() === 'true';
-}
-
 exports.addItem = async (req, res) => {
   try {
     const { sessionId } = req.params;
@@ -19,7 +13,7 @@ exports.addItem = async (req, res) => {
     const product = await prisma.product.findUnique({ where: { id: productId } });
     if (!product) return error(res, 'Sản phẩm không tồn tại', 404);
     if (!product.isActive) return error(res, 'Sản phẩm đang ngừng kinh doanh', 400);
-    const stockManaged = await isStockManagementEnabled();
+    const stockManaged = product.trackStock === true;
     if (stockManaged && product.stock < quantity) return error(res, 'Không đủ tồn kho', 400);
 
     const item = await prisma.$transaction(async (tx) => {
@@ -71,10 +65,14 @@ exports.updateItem = async (req, res) => {
     const session = await prisma.session.findUnique({ where: { id: item.sessionId } });
     if (!session || session.status !== 'ACTIVE') return error(res, 'Phiên không hợp lệ', 400);
 
+    if (req.user.role === 'STAFF' && quantity < item.quantity) {
+      return error(res, 'Nhân viên không được giảm hoặc xóa món đã thêm', 403);
+    }
+
     const delta = quantity - item.quantity;
-    const stockManaged = await isStockManagementEnabled();
+    const product = await prisma.product.findUnique({ where: { id: item.productId } });
+    const stockManaged = product && product.trackStock === true;
     if (stockManaged && delta > 0) {
-      const product = await prisma.product.findUnique({ where: { id: item.productId } });
       if (!product || product.stock < delta) return error(res, 'Không đủ tồn kho', 400);
     }
 
@@ -111,7 +109,8 @@ exports.removeItem = async (req, res) => {
   try {
     const item = await prisma.orderItem.findUnique({ where: { id: req.params.id } });
     if (!item) return error(res, 'Không tìm thấy', 404);
-    const stockManaged = await isStockManagementEnabled();
+    const product = await prisma.product.findUnique({ where: { id: item.productId } });
+    const stockManaged = product && product.trackStock === true;
 
     await prisma.$transaction(
       stockManaged
