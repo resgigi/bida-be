@@ -11,18 +11,68 @@ async function verifyPassword(userId, password) {
 
 exports.deleteAllSessions = async (req, res) => {
   try {
-    const { password, confirmation } = req.body;
-    if (confirmation !== 'XOA TAT CA') return error(res, 'Vui lòng nhập đúng "XOA TAT CA" để xác nhận', 400);
+    const { password, confirmation, from, to } = req.body;
+    if (req.user.role !== 'SUPER_ADMIN' && confirmation !== 'XOA TAT CA') {
+      return error(res, 'Vui lòng nhập đúng "XOA TAT CA" để xác nhận', 400);
+    }
     const valid = await verifyPassword(req.user.id, password);
     if (!valid) return error(res, 'Mật khẩu không đúng', 401);
 
-    const count = await prisma.session.count();
-    await prisma.orderItem.deleteMany({});
-    await prisma.session.deleteMany({});
-    await prisma.auditLog.deleteMany({ where: { entity: 'Session' } });
-    await prisma.room.updateMany({ data: { status: 'AVAILABLE' } });
-    await logAction(req.user.id, 'DELETE_ALL', 'Session', '', { count });
-    return success(res, { deletedCount: count }, `Đã xóa ${count} phiên chơi`);
+    const where = {};
+    if (from || to) {
+      where.createdAt = {};
+      if (from) {
+        const fromDate = new Date(from);
+        fromDate.setHours(0, 0, 0, 0);
+        where.createdAt.gte = fromDate;
+      }
+      if (to) {
+        const toDate = new Date(to);
+        toDate.setHours(23, 59, 59, 999);
+        where.createdAt.lte = toDate;
+      }
+    }
+
+    const sessions = await prisma.session.findMany({
+      where,
+      select: { id: true, roomId: true },
+    });
+    const sessionIds = sessions.map((s) => s.id);
+    const count = sessionIds.length;
+    if (count === 0) {
+      return success(res, { deletedCount: 0 }, 'Không có phiên nào trong kỳ đã chọn');
+    }
+
+    await prisma.orderItem.deleteMany({ where: { sessionId: { in: sessionIds } } });
+    await prisma.session.deleteMany({ where: { id: { in: sessionIds } } });
+    await prisma.auditLog.deleteMany({
+      where: {
+        entity: 'Session',
+        OR: [
+          { entityId: { in: sessionIds } },
+          ...(from || to ? [{ createdAt: where.createdAt }] : []),
+        ],
+      },
+    });
+
+    const affectedRoomIds = [...new Set(sessions.map((s) => s.roomId).filter(Boolean))];
+    if (affectedRoomIds.length > 0) {
+      for (const roomId of affectedRoomIds) {
+        const hasActive = await prisma.session.count({
+          where: { roomId, status: { in: ['ACTIVE', 'PAYMENT_REQUESTED'] } },
+        });
+        if (!hasActive) {
+          await prisma.room.update({ where: { id: roomId }, data: { status: 'AVAILABLE' } });
+        }
+      }
+    }
+
+    await logAction(req.user.id, 'DELETE_ALL', 'Session', '', { count, from: from || null, to: to || null });
+    return success(
+      res,
+      { deletedCount: count },
+      from || to ? `Đã xóa ${count} phiên chơi trong kỳ đã chọn` : `Đã xóa ${count} phiên chơi`
+    );
   } catch (err) {
     return error(res, err.message);
   }
@@ -31,7 +81,9 @@ exports.deleteAllSessions = async (req, res) => {
 exports.deleteAllProducts = async (req, res) => {
   try {
     const { password, confirmation } = req.body;
-    if (confirmation !== 'XOA TAT CA') return error(res, 'Vui lòng nhập đúng "XOA TAT CA" để xác nhận', 400);
+    if (req.user.role !== 'SUPER_ADMIN' && confirmation !== 'XOA TAT CA') {
+      return error(res, 'Vui lòng nhập đúng "XOA TAT CA" để xác nhận', 400);
+    }
     const valid = await verifyPassword(req.user.id, password);
     if (!valid) return error(res, 'Mật khẩu không đúng', 401);
 
@@ -48,7 +100,9 @@ exports.deleteAllProducts = async (req, res) => {
 exports.deleteAllRooms = async (req, res) => {
   try {
     const { password, confirmation } = req.body;
-    if (confirmation !== 'XOA TAT CA') return error(res, 'Vui lòng nhập đúng "XOA TAT CA" để xác nhận', 400);
+    if (req.user.role !== 'SUPER_ADMIN' && confirmation !== 'XOA TAT CA') {
+      return error(res, 'Vui lòng nhập đúng "XOA TAT CA" để xác nhận', 400);
+    }
     const valid = await verifyPassword(req.user.id, password);
     if (!valid) return error(res, 'Mật khẩu không đúng', 401);
 
@@ -67,7 +121,9 @@ exports.deleteAllRooms = async (req, res) => {
 exports.deleteAllData = async (req, res) => {
   try {
     const { password, confirmation } = req.body;
-    if (confirmation !== 'XOA TAT CA') return error(res, 'Vui lòng nhập đúng "XOA TAT CA" để xác nhận', 400);
+    if (req.user.role !== 'SUPER_ADMIN' && confirmation !== 'XOA TAT CA') {
+      return error(res, 'Vui lòng nhập đúng "XOA TAT CA" để xác nhận', 400);
+    }
     const valid = await verifyPassword(req.user.id, password);
     if (!valid) return error(res, 'Mật khẩu không đúng', 401);
 
