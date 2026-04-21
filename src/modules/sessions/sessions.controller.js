@@ -20,6 +20,19 @@ function normalizeRoomAction(log) {
   };
 }
 
+async function fetchOrderItemAdjustmentLogs(sessionId) {
+  const logs = await prisma.auditLog.findMany({
+    where: {
+      entity: 'Session',
+      entityId: sessionId,
+      action: { in: ['ORDER_ITEM_REMOVED', 'ORDER_ITEM_QUANTITY_DECREASED'] },
+    },
+    include: { user: { select: { fullName: true, username: true } } },
+    orderBy: { createdAt: 'asc' },
+  });
+  return logs.map(normalizeRoomAction);
+}
+
 const SESSION_STATUSES = ['ACTIVE', 'PAYMENT_REQUESTED', 'COMPLETED', 'CANCELLED'];
 
 exports.getAll = async (req, res) => {
@@ -162,7 +175,12 @@ exports.getById = async (req, res) => {
       include: {
         room: true,
         staff: { select: { id: true, fullName: true, username: true } },
-        orderItems: { include: { product: { include: { category: true } } } },
+        orderItems: {
+          include: {
+            product: { include: { category: true } },
+            confirmedBy: { select: { id: true, fullName: true, username: true } },
+          },
+        },
       },
     });
     if (!session) return error(res, 'Phiên không tồn tại', 404);
@@ -177,10 +195,112 @@ exports.getById = async (req, res) => {
       orderBy: { createdAt: 'desc' },
     });
 
+    const orderConfirmationLogs = await prisma.auditLog.findMany({
+      where: {
+        entity: 'Session',
+        entityId: session.id,
+        action: 'CONFIRM_ORDER_ITEMS',
+      },
+      include: { user: { select: { fullName: true, username: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const orderItemAdjustments = await fetchOrderItemAdjustmentLogs(session.id);
+
     return success(res, {
       ...session,
       roomActions: roomActionLogs.map(normalizeRoomAction),
+      orderConfirmations: orderConfirmationLogs.map(normalizeRoomAction),
+      orderItemAdjustments,
     });
+  } catch (err) {
+    return error(res, err.message);
+  }
+};
+
+exports.confirmOrderItems = async (req, res) => {
+  try {
+    const session = await prisma.session.findUnique({
+      where: { id: req.params.id },
+      include: { room: true, orderItems: { include: { product: true } } },
+    });
+    if (!session) return error(res, 'Phiên không tồn tại', 404);
+    if (session.status !== 'ACTIVE') return error(res, 'Chỉ xác nhận được khi phiên đang hoạt động', 400);
+
+    const pending = session.orderItems.filter((i) => !i.confirmedAt);
+    if (pending.length === 0) return error(res, 'Không có món chưa xác nhận', 400);
+
+    const now = new Date();
+    await prisma.$transaction(async (tx) => {
+      for (const i of pending) {
+        await tx.orderItem.update({
+          where: { id: i.id },
+          data: { confirmedAt: now, confirmedByUserId: req.user.id },
+        });
+      }
+    });
+
+    const lines = pending.map((i) => ({
+      orderItemId: i.id,
+      productId: i.productId,
+      productName: i.product?.name || '',
+      code: i.product?.code || '',
+      quantity: i.quantity,
+      unitPrice: i.unitPrice,
+      totalPrice: i.totalPrice,
+    }));
+
+    await logAction(req.user.id, 'CONFIRM_ORDER_ITEMS', 'Session', session.id, {
+      roomName: session.room?.name,
+      lines,
+    });
+
+    if (req.app.get('io')) {
+      req.app.get('io').emit('order:updated', { sessionId: session.id });
+    }
+
+    const refreshed = await prisma.session.findUnique({
+      where: { id: req.params.id },
+      include: {
+        room: true,
+        staff: { select: { id: true, fullName: true, username: true } },
+        orderItems: {
+          include: {
+            product: { include: { category: true } },
+            confirmedBy: { select: { id: true, fullName: true, username: true } },
+          },
+        },
+      },
+    });
+
+    const roomActionLogs = await prisma.auditLog.findMany({
+      where: {
+        entity: 'Session',
+        entityId: refreshed.id,
+        action: { in: ['CANCEL_SESSION', 'TRANSFER_ROOM'] },
+      },
+      include: { user: { select: { fullName: true, username: true } } },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const orderConfirmationLogs = await prisma.auditLog.findMany({
+      where: {
+        entity: 'Session',
+        entityId: refreshed.id,
+        action: 'CONFIRM_ORDER_ITEMS',
+      },
+      include: { user: { select: { fullName: true, username: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    const orderItemAdjustments = await fetchOrderItemAdjustmentLogs(refreshed.id);
+
+    return success(res, {
+      ...refreshed,
+      roomActions: roomActionLogs.map(normalizeRoomAction),
+      orderConfirmations: orderConfirmationLogs.map(normalizeRoomAction),
+      orderItemAdjustments,
+    }, 'Đã xác nhận đặt món');
   } catch (err) {
     return error(res, err.message);
   }

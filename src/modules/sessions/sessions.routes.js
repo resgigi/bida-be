@@ -5,6 +5,7 @@ const { authenticate, authorize } = require('../../middleware/auth');
 router.use(authenticate);
 router.get('/assignable-staff', controller.getAssignableStaff);
 router.get('/', authorize('SUPER_ADMIN', 'MANAGER', 'CASHIER', 'STAFF'), controller.getAll);
+router.post('/:id/confirm-order-items', authorize('SUPER_ADMIN', 'MANAGER', 'CASHIER', 'STAFF'), controller.confirmOrderItems);
 router.get('/:id', authorize('SUPER_ADMIN', 'MANAGER', 'CASHIER', 'STAFF'), controller.getById);
 router.post('/start', authorize('SUPER_ADMIN', 'MANAGER', 'CASHIER', 'STAFF'), controller.startSession);
 router.put('/:id/end', authorize('SUPER_ADMIN', 'MANAGER', 'CASHIER', 'STAFF'), controller.endSession);

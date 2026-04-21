@@ -8,17 +8,18 @@ datasource db {
 }
 
 model User {
-  id           String        @id @default(cuid())
-  username     String        @unique
-  password     String
-  fullName     String
-  role         Role          @default(STAFF)
-  isActive     Boolean       @default(true)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  auditLogs    AuditLog[]
-  dailyReports DailyReport[]
-  sessions     Session[]
+  id                     String        @id @default(cuid())
+  username               String        @unique
+  password               String
+  fullName               String
+  role                   Role          @default(STAFF)
+  isActive               Boolean       @default(true)
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+  auditLogs              AuditLog[]
+  dailyReports           DailyReport[]
+  sessions               Session[]
+  orderItemsConfirmed    OrderItem[]   @relation("OrderItemConfirmation")
 }
 
 model Room {
@@ -86,15 +87,18 @@ model Product {
 }
 
 model OrderItem {
-  id         String   @id @default(cuid())
-  sessionId  String
-  productId  String
-  quantity   Int
-  unitPrice  Int
-  totalPrice Int
-  createdAt  DateTime @default(now())
-  product    Product  @relation(fields: [productId], references: [id])
-  session    Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  id                  String    @id @default(cuid())
+  sessionId           String
+  productId           String
+  quantity            Int
+  unitPrice           Int
+  totalPrice          Int
+  createdAt           DateTime  @default(now())
+  confirmedAt         DateTime?
+  confirmedByUserId   String?
+  product             Product   @relation(fields: [productId], references: [id])
+  session             Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  confirmedBy         User?     @relation("OrderItemConfirmation", fields: [confirmedByUserId], references: [id])
 }
 
 model DailyReport {

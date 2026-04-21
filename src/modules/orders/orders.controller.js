@@ -1,5 +1,6 @@
 const prisma = require('../../config/database');
 const { success, error } = require('../../utils/response');
+const { logAction } = require('../../utils/audit');
 
 exports.addItem = async (req, res) => {
   try {
@@ -17,7 +18,9 @@ exports.addItem = async (req, res) => {
     if (stockManaged && product.stock < quantity) return error(res, 'Không đủ tồn kho', 400);
 
     const item = await prisma.$transaction(async (tx) => {
-      const existing = await tx.orderItem.findFirst({ where: { sessionId, productId } });
+      const existing = await tx.orderItem.findFirst({
+        where: { sessionId, productId, confirmedAt: null },
+      });
       const updatedItem = existing
         ? await tx.orderItem.update({
             where: { id: existing.id },
@@ -62,9 +65,15 @@ exports.updateItem = async (req, res) => {
     const quantity = Math.max(1, Number(req.body.quantity) || 1);
     const item = await prisma.orderItem.findUnique({ where: { id: req.params.id } });
     if (!item) return error(res, 'Không tìm thấy', 404);
-    const session = await prisma.session.findUnique({ where: { id: item.sessionId } });
+    const session = await prisma.session.findUnique({
+      where: { id: item.sessionId },
+      include: { room: true },
+    });
     if (!session || session.status !== 'ACTIVE') return error(res, 'Phiên không hợp lệ', 400);
 
+    if (req.user.role === 'STAFF' && item.confirmedAt && quantity !== item.quantity) {
+      return error(res, 'Nhân viên không được sửa món đã xác nhận đã gọi', 403);
+    }
     if (req.user.role === 'STAFF' && quantity < item.quantity) {
       return error(res, 'Nhân viên không được giảm hoặc xóa món đã thêm', 403);
     }
@@ -96,6 +105,20 @@ exports.updateItem = async (req, res) => {
       });
     });
 
+    if (delta < 0) {
+      await logAction(req.user.id, 'ORDER_ITEM_QUANTITY_DECREASED', 'Session', item.sessionId, {
+        roomName: session.room?.name,
+        orderItemId: item.id,
+        productId: item.productId,
+        productName: product?.name || '',
+        code: product?.code || '',
+        previousQuantity: item.quantity,
+        newQuantity: quantity,
+        quantityReduced: -delta,
+        unitPrice: item.unitPrice,
+      });
+    }
+
     if (req.app.get('io')) {
       req.app.get('io').emit('order:updated', { sessionId: item.sessionId });
     }
@@ -107,9 +130,20 @@ exports.updateItem = async (req, res) => {
 
 exports.removeItem = async (req, res) => {
   try {
-    const item = await prisma.orderItem.findUnique({ where: { id: req.params.id } });
+    const item = await prisma.orderItem.findUnique({
+      where: { id: req.params.id },
+      include: { product: true },
+    });
     if (!item) return error(res, 'Không tìm thấy', 404);
-    const product = await prisma.product.findUnique({ where: { id: item.productId } });
+    const session = await prisma.session.findUnique({
+      where: { id: item.sessionId },
+      include: { room: true },
+    });
+    if (!session || (session.status !== 'ACTIVE' && session.status !== 'PAYMENT_REQUESTED')) {
+      return error(res, 'Phiên không hợp lệ', 400);
+    }
+
+    const product = item.product || await prisma.product.findUnique({ where: { id: item.productId } });
     const stockManaged = product && product.trackStock === true;
 
     await prisma.$transaction(
@@ -123,6 +157,17 @@ exports.removeItem = async (req, res) => {
           ]
         : [prisma.orderItem.delete({ where: { id: req.params.id } })],
     );
+
+    await logAction(req.user.id, 'ORDER_ITEM_REMOVED', 'Session', item.sessionId, {
+      roomName: session.room?.name,
+      orderItemId: item.id,
+      productId: item.productId,
+      productName: product?.name || '',
+      code: product?.code || '',
+      quantityRemoved: item.quantity,
+      unitPrice: item.unitPrice,
+      totalPrice: item.totalPrice,
+    });
 
     if (req.app.get('io')) {
       req.app.get('io').emit('order:updated', { sessionId: item.sessionId });
