@@ -257,7 +257,6 @@ exports.getTopProducts = async (req, res) => {
       where: { sessionId: { in: sessionIds } },
       _sum: { quantity: true, totalPrice: true },
       orderBy: { _sum: { totalPrice: 'desc' } },
-      take: 12,
     });
     const productIds = items.map((i) => i.productId);
     const products = await prisma.product.findMany({ where: { id: { in: productIds } } });
@@ -274,7 +273,7 @@ exports.getTopProducts = async (req, res) => {
 exports.getRecentSessions = async (req, res) => {
   try {
     const { rangeStart, rangeEnd } = getRangeFromQuery(req.query);
-    const limit = Math.min(Number(req.query.limit) || 15, 50);
+    const limit = Math.min(Number(req.query.limit) || 30, 200);
     const sessions = await prisma.session.findMany({
       where: { createdAt: { gte: rangeStart, lte: rangeEnd } },
       take: limit,
