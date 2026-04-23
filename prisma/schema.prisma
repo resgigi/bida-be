@@ -1,0 +1,164 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                     String        @id @default(cuid())
+  username               String        @unique
+  password               String
+  fullName               String
+  role                   Role          @default(STAFF)
+  isActive               Boolean       @default(true)
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+  auditLogs              AuditLog[]
+  dailyReports           DailyReport[]
+  sessions               Session[]
+  orderItemsConfirmed    OrderItem[]   @relation("OrderItemConfirmation")
+}
+
+model Room {
+  id           String     @id @default(cuid())
+  name         String
+  description  String     @default("")
+  pricePerHour Int
+  status       RoomStatus @default(AVAILABLE)
+  type         RoomType   @default(NORMAL)
+  sortOrder    Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  sessions     Session[]
+}
+
+model Session {
+  id                 String        @id @default(cuid())
+  roomId             String
+  staffId            String
+  startTime          DateTime      @default(now())
+  endTime            DateTime?
+  totalPlayAmount    Int           @default(0)
+  totalFoodAmount    Int           @default(0)
+  discountAmount     Int           @default(0)
+  discountPercent    Int           @default(0)
+  totalAmount        Int           @default(0)
+  paidAmount         Int           @default(0)
+  paymentMethod      PaymentMethod @default(CASH)
+  status             SessionStatus @default(ACTIVE)
+  note               String        @default("")
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  approvedBy         String        @default("")
+  paymentRequestedAt DateTime?
+  paymentRequestedBy String        @default("")
+  orderItems         OrderItem[]
+  room               Room          @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  staff              User          @relation(fields: [staffId], references: [id])
+}
+
+model Category {
+  id        String    @id @default(cuid())
+  name      String
+  code      String    @unique
+  sortOrder Int       @default(0)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  products  Product[]
+}
+
+model Product {
+  id         String      @id @default(cuid())
+  name       String
+  code       String      @unique
+  categoryId String
+  price      Int
+  stock      Int         @default(0)
+  trackStock Boolean     @default(true)
+  imageUrl   String      @default("")
+  isActive   Boolean     @default(true)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  orderItems OrderItem[]
+  category   Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+}
+
+model OrderItem {
+  id                  String    @id @default(cuid())
+  sessionId           String
+  productId           String
+  quantity            Int
+  unitPrice           Int
+  totalPrice          Int
+  createdAt           DateTime  @default(now())
+  confirmedAt         DateTime?
+  confirmedByUserId   String?
+  product             Product   @relation(fields: [productId], references: [id])
+  session             Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  confirmedBy         User?     @relation("OrderItemConfirmation", fields: [confirmedByUserId], references: [id])
+}
+
+model DailyReport {
+  id               String   @id @default(cuid())
+  reportDate       DateTime @unique
+  totalSessions    Int      @default(0)
+  totalRevenue     Int      @default(0)
+  totalPlayRevenue Int      @default(0)
+  totalFoodRevenue Int      @default(0)
+  totalDiscount    Int      @default(0)
+  createdById      String
+  createdAt        DateTime @default(now())
+  createdBy        User     @relation(fields: [createdById], references: [id])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String
+  entity    String
+  entityId  String   @default("")
+  details   String   @default("{}")
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model Setting {
+  id    String @id @default(cuid())
+  key   String @unique
+  value String
+}
+
+enum Role {
+  SUPER_ADMIN
+  MANAGER
+  STAFF
+  CASHIER
+}
+
+enum RoomStatus {
+  AVAILABLE
+  IN_USE
+  MAINTENANCE
+}
+
+enum RoomType {
+  NORMAL
+  VIP
+  TAKEAWAY
+}
+
+enum SessionStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  PAYMENT_REQUESTED
+}
+
+enum PaymentMethod {
+  CASH
+  TRANSFER
+  CARD
+}

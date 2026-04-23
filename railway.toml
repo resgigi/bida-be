@@ -1,0 +1,5 @@
+# Railway Dashboard → Service → Settings → Root Directory: backend
+# Thêm PostgreSQL plugin và biến DATABASE_URL + JWT secrets (xem DEPLOY.md)
+
+[deploy]
+healthcheckPath = "/api/health"
