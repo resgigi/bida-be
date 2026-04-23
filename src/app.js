@@ -8,16 +8,34 @@ const { setupSocket } = require('./socket');
 
 const app = express();
 const server = http.createServer(app);
+const defaultAllowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost',
+  'capacitor://localhost',
+  'ionic://localhost',
+];
+const allowedOrigins = (process.env.FRONTEND_URL || '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const corsOrigins = [...new Set([...defaultAllowedOrigins, ...allowedOrigins])];
+const corsOriginChecker = (origin, callback) => {
+  // Allow non-browser requests (curl/postman) and same-origin server calls.
+  if (!origin) return callback(null, true);
+  if (corsOrigins.includes(origin)) return callback(null, true);
+  return callback(new Error(`Not allowed by CORS: ${origin}`));
+};
+
 const io = new Server(server, {
   cors: {
-    origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+    origin: corsOriginChecker,
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
   },
 });
 
 app.set('io', io);
 
-app.use(cors({ origin: process.env.FRONTEND_URL || 'http://localhost:5173', credentials: true }));
+app.use(cors({ origin: corsOriginChecker, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
