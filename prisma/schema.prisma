@@ -55,6 +55,9 @@ model Session {
   approvedBy         String        @default("")
   paymentRequestedAt DateTime?
   paymentRequestedBy String        @default("")
+  isPaused           Boolean       @default(false)
+  pausedAt           DateTime?
+  pausedDuration     Int           @default(0)
   orderItems         OrderItem[]
   room               Room          @relation(fields: [roomId], references: [id], onDelete: Cascade)
   staff              User          @relation(fields: [staffId], references: [id])

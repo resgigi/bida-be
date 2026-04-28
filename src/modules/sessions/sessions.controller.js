@@ -354,8 +354,11 @@ exports.endSession = async (req, res) => {
     if (session.status !== 'ACTIVE') return error(res, 'Phiên đã kết thúc', 400);
 
     const endTime = new Date();
-    const durationMs = endTime - new Date(session.startTime);
-    const durationHours = durationMs / (1000 * 60 * 60);
+    // Calculate actual playing time (excluding paused duration)
+    const totalMs = endTime - new Date(session.startTime);
+    const pausedMs = session.pausedDuration * 1000;
+    const actualPlayingMs = Math.max(0, totalMs - pausedMs);
+    const durationHours = actualPlayingMs / (1000 * 60 * 60);
     const totalPlayAmount = Math.round(durationHours * session.room.pricePerHour);
     const totalFoodAmount = session.orderItems.reduce((sum, item) => sum + item.totalPrice, 0);
 
@@ -381,8 +384,11 @@ exports.requestPayment = async (req, res) => {
     if (session.status === 'COMPLETED') return error(res, 'Phiên đã thanh toán', 400);
 
     const endTime = session.endTime || new Date();
-    const durationMs = endTime - new Date(session.startTime);
-    const durationHours = durationMs / (1000 * 60 * 60);
+    // Calculate actual playing time (excluding paused duration)
+    const totalMs = endTime - new Date(session.startTime);
+    const pausedMs = session.pausedDuration * 1000;
+    const actualPlayingMs = Math.max(0, totalMs - pausedMs);
+    const durationHours = actualPlayingMs / (1000 * 60 * 60);
     const totalPlayAmount = Math.round(durationHours * session.room.pricePerHour);
     const totalFoodAmount = session.orderItems.reduce((sum, item) => sum + item.totalPrice, 0);
 
@@ -517,6 +523,78 @@ exports.transferRoom = async (req, res) => {
     }
 
     return success(res, transferred, 'Chuyển phòng thành công, đã giữ nguyên giờ chơi và món đã gọi');
+  } catch (err) {
+    return error(res, err.message);
+  }
+};
+
+exports.resumeSession = async (req, res) => {
+  try {
+    const session = await prisma.session.findUnique({
+      where: { id: req.params.id },
+      include: { room: true, orderItems: true },
+    });
+    if (!session) return error(res, 'Phiên không tồn tại', 404);
+    if (!session.isPaused) return error(res, 'Phiên không trong trạng thái tạm dừng', 400);
+
+    // Calculate additional paused duration
+    const now = new Date();
+    const additionalPausedDuration = Math.round((now - session.pausedAt) / 1000); // seconds
+
+    const updated = await prisma.session.update({
+      where: { id: req.params.id },
+      data: {
+        isPaused: false,
+        pausedAt: null,
+        pausedDuration: session.pausedDuration + additionalPausedDuration,
+      },
+      include: { room: true, staff: { select: { id: true, fullName: true, username: true } }, orderItems: { include: { product: true } } },
+    });
+
+    await logAction(req.user.id, 'RESUME_SESSION', 'Session', session.id, {
+      roomName: session.room?.name,
+      additionalPausedDuration,
+      totalPausedDuration: updated.pausedDuration,
+    });
+
+    if (req.app.get('io')) {
+      req.app.get('io').emit('session:updated', updated);
+    }
+
+    return success(res, updated, 'Tiếp tục phiên chơi');
+  } catch (err) {
+    return error(res, err.message);
+  }
+};
+
+exports.pauseSession = async (req, res) => {
+  try {
+    const session = await prisma.session.findUnique({
+      where: { id: req.params.id },
+      include: { room: true, orderItems: true },
+    });
+    if (!session) return error(res, 'Phiên không tồn tại', 404);
+    if (session.isPaused) return error(res, 'Phiên đang tạm dừng', 400);
+    if (session.status !== 'ACTIVE') return error(res, 'Chỉ tạm dừng được khi phiên đang hoạt động', 400);
+
+    const updated = await prisma.session.update({
+      where: { id: req.params.id },
+      data: {
+        isPaused: true,
+        pausedAt: new Date(),
+      },
+      include: { room: true, staff: { select: { id: true, fullName: true, username: true } }, orderItems: { include: { product: true } } },
+    });
+
+    await logAction(req.user.id, 'PAUSE_SESSION', 'Session', session.id, {
+      roomName: session.room?.name,
+    });
+
+    if (req.app.get('io')) {
+      req.app.get('io').emit('session:updated', updated);
+    }
+
+    return success(res, updated, 'Đã tạm dừng phiên chơi');
   } catch (err) {
     return error(res, err.message);
   }
