@@ -612,10 +612,17 @@ exports.resumeEnded = async (req, res) => {
       return error(res, 'Phiên đã thanh toán hoặc hủy, không thể tiếp tục', 400);
     }
 
+    // Calculate duration played (in seconds)
+    const playedDuration = Math.round((new Date(session.endTime) - new Date(session.startTime)) / 1000);
+    const totalPausedDuration = (session.pausedDuration || 0) + playedDuration;
+
     const updated = await prisma.session.update({
       where: { id: req.params.id },
       data: {
         endTime: null,
+        isPaused: false,
+        pausedAt: null,
+        pausedDuration: totalPausedDuration,
         totalPlayAmount: 0,
         totalFoodAmount: 0,
       },
@@ -624,6 +631,7 @@ exports.resumeEnded = async (req, res) => {
 
     await logAction(req.user.id, 'RESUME_ENDED', 'Session', session.id, {
       roomName: session.room?.name,
+      playedDuration,
     });
 
     if (req.app.get('io')) {
