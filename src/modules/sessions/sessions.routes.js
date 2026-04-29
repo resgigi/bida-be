@@ -11,6 +11,7 @@ router.post('/start', authorize('SUPER_ADMIN', 'MANAGER', 'CASHIER', 'STAFF'), c
 router.put('/:id/end', authorize('SUPER_ADMIN', 'MANAGER', 'CASHIER', 'STAFF'), controller.endSession);
 router.put('/:id/pause', authorize('SUPER_ADMIN', 'MANAGER'), controller.pauseSession);
 router.put('/:id/resume', authorize('SUPER_ADMIN', 'MANAGER'), controller.resumeSession);
+router.put('/:id/resume-ended', authorize('SUPER_ADMIN', 'MANAGER'), controller.resumeEnded);
 router.put('/:id/cancel', authorize('SUPER_ADMIN', 'MANAGER', 'CASHIER'), controller.cancelSession);
 router.put('/:id/transfer-room', authorize('SUPER_ADMIN', 'MANAGER', 'CASHIER'), controller.transferRoom);
 router.post('/:id/request-payment', authorize('SUPER_ADMIN', 'MANAGER', 'CASHIER', 'STAFF'), controller.requestPayment);

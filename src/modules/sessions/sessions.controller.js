@@ -600,6 +600,42 @@ exports.pauseSession = async (req, res) => {
   }
 };
 
+exports.resumeEnded = async (req, res) => {
+  try {
+    const session = await prisma.session.findUnique({
+      where: { id: req.params.id },
+      include: { room: true, orderItems: true },
+    });
+    if (!session) return error(res, 'Phiên không tồn tại', 404);
+    if (!session.endTime) return error(res, 'Phiên chưa kết thúc', 400);
+    if (session.status === 'COMPLETED' || session.status === 'CANCELLED') {
+      return error(res, 'Phiên đã thanh toán hoặc hủy, không thể tiếp tục', 400);
+    }
+
+    const updated = await prisma.session.update({
+      where: { id: req.params.id },
+      data: {
+        endTime: null,
+        totalPlayAmount: 0,
+        totalFoodAmount: 0,
+      },
+      include: { room: true, staff: { select: { id: true, fullName: true, username: true } }, orderItems: { include: { product: true } } },
+    });
+
+    await logAction(req.user.id, 'RESUME_ENDED', 'Session', session.id, {
+      roomName: session.room?.name,
+    });
+
+    if (req.app.get('io')) {
+      req.app.get('io').emit('session:updated', updated);
+    }
+
+    return success(res, updated, 'Tiếp tục phiên chơi');
+  } catch (err) {
+    return error(res, err.message);
+  }
+};
+
 exports.checkout = async (req, res) => {
   try {
     const { discountAmount = 0, discountPercent = 0, paidAmount, paymentMethod = 'CASH', note = '', playAmountOverride } = req.body;
