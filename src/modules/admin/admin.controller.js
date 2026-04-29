@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const prisma = require('../../config/database');
 const { success, error } = require('../../utils/response');
 const { logAction } = require('../../utils/audit');
+const tz = require('../../utils/timezone');
 
 async function verifyPassword(userId, password) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -204,6 +205,32 @@ exports.updateSettings = async (req, res) => {
     }
     await logAction(req.user.id, 'UPDATE', 'Setting', '', req.body);
     return success(res, null, 'Cập nhật cài đặt thành công');
+  } catch (err) {
+    return error(res, err.message);
+  }
+};
+
+exports.getTimezoneSettings = async (_req, res) => {
+  try {
+    const dayStartHour = await tz.getDayStartHour();
+    return success(res, { dayStartHour });
+  } catch (err) {
+    return error(res, err.message);
+  }
+};
+
+exports.updateTimezoneSettings = async (req, res) => {
+  try {
+    const { dayStartHour } = req.body;
+    if (dayStartHour !== undefined) {
+      if (dayStartHour !== 5 && dayStartHour !== 7) {
+        return error(res, 'Giờ bắt đầu ngày phải là 5 hoặc 7', 400);
+      }
+      await tz.setDayStartHour(dayStartHour);
+      await logAction(req.user.id, 'UPDATE', 'TimezoneSettings', '', { dayStartHour });
+    }
+    const newDayStartHour = await tz.getDayStartHour();
+    return success(res, { dayStartHour: newDayStartHour }, 'Cập nhật cài đặt múi giờ thành công');
   } catch (err) {
     return error(res, err.message);
   }

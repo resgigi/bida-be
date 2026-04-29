@@ -1,58 +1,20 @@
 const prisma = require('../../config/database');
 const { success, error } = require('../../utils/response');
-
-function startOfDay(date) {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-function endOfDay(date) {
-  const d = new Date(date);
-  d.setHours(23, 59, 59, 999);
-  return d;
-}
+const tz = require('../../utils/timezone');
 
 function pad(n) {
   return String(n).padStart(2, '0');
 }
 
-/** @returns {{ rangeStart: Date, rangeEnd: Date, preset: string }} */
-function getRangeFromQuery(query) {
-  const preset = (query.preset || 'today').toLowerCase();
-  const now = new Date();
-  let rangeStart;
-  let rangeEnd;
-
-  if (preset === 'custom' && query.from && query.to) {
-    rangeStart = startOfDay(new Date(query.from));
-    rangeEnd = endOfDay(new Date(query.to));
-  } else if (preset === 'week') {
-    const d = new Date(now);
-    const day = d.getDay();
-    const mondayOffset = day === 0 ? -6 : 1 - day;
-    rangeStart = startOfDay(new Date(d.getFullYear(), d.getMonth(), d.getDate() + mondayOffset));
-    rangeEnd = endOfDay(now);
-  } else if (preset === 'month') {
-    rangeStart = startOfDay(new Date(now.getFullYear(), now.getMonth(), 1));
-    rangeEnd = endOfDay(new Date(now.getFullYear(), now.getMonth() + 1, 0));
-  } else if (preset === 'year') {
-    rangeStart = startOfDay(new Date(now.getFullYear(), 0, 1));
-    rangeEnd = endOfDay(new Date(now.getFullYear(), 11, 31));
-  } else {
-    rangeStart = startOfDay(now);
-    rangeEnd = endOfDay(now);
-  }
-
-  if (rangeStart > rangeEnd) {
-    const t = rangeStart;
-    rangeStart = rangeEnd;
-    rangeEnd = t;
-  }
-
-  return { rangeStart, rangeEnd, preset: preset === 'custom' ? 'custom' : preset };
+/** @returns {{ rangeStart: Date, rangeEnd: Date, preset: string, dayStartHour: number }} */
+async function getRangeFromQuery(query) {
+  return tz.getRangeFromQueryWithTZ(query);
 }
 
 function getComparisonRange(preset, rangeStart, rangeEnd) {
+  const startOfDay = tz.startOfDayLocal;
+  const endOfDay = tz.endOfDayLocal;
+  
   if (preset === 'today') {
     const y = new Date(rangeStart);
     y.setDate(y.getDate() - 1);
@@ -132,7 +94,7 @@ function getGroupMeta(date, bucket) {
 
 exports.getStats = async (req, res) => {
   try {
-    const { rangeStart, rangeEnd, preset } = getRangeFromQuery(req.query);
+    const { rangeStart, rangeEnd, preset, dayStartHour } = await getRangeFromQuery(req.query);
     const { prevRangeStart, prevRangeEnd } = getComparisonRange(preset, rangeStart, rangeEnd);
 
     const [
@@ -207,7 +169,7 @@ function formatRangeLabelVi(a, b, preset) {
 
 exports.getRevenueChart = async (req, res) => {
   try {
-    const { rangeStart, rangeEnd, preset } = getRangeFromQuery(req.query);
+    const { rangeStart, rangeEnd, preset } = await getRangeFromQuery(req.query);
     const bucket = resolveBucket(rangeStart, rangeEnd, req.query.bucket);
 
     const sessions = await prisma.session.findMany({
@@ -244,7 +206,7 @@ exports.getRevenueChart = async (req, res) => {
 
 exports.getTopProducts = async (req, res) => {
   try {
-    const { rangeStart, rangeEnd } = getRangeFromQuery(req.query);
+    const { rangeStart, rangeEnd } = await getRangeFromQuery(req.query);
     const completed = await prisma.session.findMany({
       where: { status: 'COMPLETED', createdAt: { gte: rangeStart, lte: rangeEnd } },
       select: { id: true },
@@ -272,7 +234,7 @@ exports.getTopProducts = async (req, res) => {
 
 exports.getRecentSessions = async (req, res) => {
   try {
-    const { rangeStart, rangeEnd } = getRangeFromQuery(req.query);
+    const { rangeStart, rangeEnd } = await getRangeFromQuery(req.query);
     const limit = Math.min(Number(req.query.limit) || 30, 200);
     const sessions = await prisma.session.findMany({
       where: { createdAt: { gte: rangeStart, lte: rangeEnd } },

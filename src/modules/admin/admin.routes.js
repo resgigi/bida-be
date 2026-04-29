@@ -10,5 +10,7 @@ router.delete('/data/all', authorize('SUPER_ADMIN'), controller.deleteAllData);
 router.get('/audit-logs', authorize('SUPER_ADMIN', 'MANAGER'), controller.getAuditLogs);
 router.get('/settings', controller.getSettings);
 router.put('/settings', authorize('SUPER_ADMIN', 'MANAGER'), controller.updateSettings);
+router.get('/timezone', controller.getTimezoneSettings);
+router.put('/timezone', authorize('SUPER_ADMIN', 'MANAGER'), controller.updateTimezoneSettings);
 
 module.exports = router;

@@ -1,14 +1,18 @@
 const prisma = require('../../config/database');
 const { success, error } = require('../../utils/response');
+const tz = require('../../utils/timezone');
 
 exports.getDailyReport = async (req, res) => {
   try {
     const { date } = req.query;
-    const reportDate = date ? new Date(date) : new Date();
-    reportDate.setHours(0, 0, 0, 0);
+    const dayStartHour = await tz.getDayStartHour();
+    const reportDate = date ? tz.startOfDayVN(new Date(date), dayStartHour) : tz.startOfDayVN(new Date(), dayStartHour);
+    const nextDay = tz.endOfDayVN(reportDate, dayStartHour);
 
-    const report = await prisma.dailyReport.findUnique({
-      where: { reportDate },
+    const report = await prisma.dailyReport.findFirst({
+      where: {
+        reportDate: { gte: reportDate, lt: nextDay }
+      },
       include: { createdBy: { select: { fullName: true } } },
     });
     return success(res, report);
@@ -19,10 +23,9 @@ exports.getDailyReport = async (req, res) => {
 
 exports.generateDailyReport = async (req, res) => {
   try {
-    const reportDate = new Date();
-    reportDate.setHours(0, 0, 0, 0);
-    const nextDay = new Date(reportDate);
-    nextDay.setDate(nextDay.getDate() + 1);
+    const dayStartHour = await tz.getDayStartHour();
+    const reportDate = tz.startOfDayVN(new Date(), dayStartHour);
+    const nextDay = tz.endOfDayVN(reportDate, dayStartHour);
 
     const sessions = await prisma.session.findMany({
       where: { status: 'COMPLETED', createdAt: { gte: reportDate, lt: nextDay } },
@@ -39,7 +42,7 @@ exports.generateDailyReport = async (req, res) => {
     };
 
     const report = await prisma.dailyReport.upsert({
-      where: { reportDate },
+      where: { reportDate: reportDate },
       update: data,
       create: data,
     });
@@ -52,15 +55,12 @@ exports.generateDailyReport = async (req, res) => {
 exports.getRevenueReport = async (req, res) => {
   try {
     const { from, to } = req.query;
+    const dayStartHour = await tz.getDayStartHour();
     const where = { status: 'COMPLETED' };
     if (from || to) {
       where.createdAt = {};
-      if (from) where.createdAt.gte = new Date(from);
-      if (to) {
-        const toDate = new Date(to);
-        toDate.setHours(23, 59, 59, 999);
-        where.createdAt.lte = toDate;
-      }
+      if (from) where.createdAt.gte = tz.startOfDayVN(new Date(from), dayStartHour);
+      if (to) where.createdAt.lte = tz.endOfDayVN(new Date(to), dayStartHour);
     }
     const sessions = await prisma.session.findMany({ where, orderBy: { createdAt: 'desc' } });
     const summary = {
@@ -79,15 +79,12 @@ exports.getRevenueReport = async (req, res) => {
 exports.getSessionHistory = async (req, res) => {
   try {
     const { page = 1, limit = 20, from, to } = req.query;
+    const dayStartHour = await tz.getDayStartHour();
     const where = { status: 'COMPLETED' };
     if (from || to) {
       where.createdAt = {};
-      if (from) where.createdAt.gte = new Date(from);
-      if (to) {
-        const toDate = new Date(to);
-        toDate.setHours(23, 59, 59, 999);
-        where.createdAt.lte = toDate;
-      }
+      if (from) where.createdAt.gte = tz.startOfDayVN(new Date(from), dayStartHour);
+      if (to) where.createdAt.lte = tz.endOfDayVN(new Date(to), dayStartHour);
     }
     const skip = (Number(page) - 1) * Number(limit);
     const [sessions, total] = await Promise.all([
@@ -109,9 +106,9 @@ exports.getSessionHistory = async (req, res) => {
 exports.getSoldItemsByDay = async (req, res) => {
   try {
     const { from, to } = req.query;
-    const start = from ? new Date(from) : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-    const end = to ? new Date(to) : new Date();
-    end.setHours(23, 59, 59, 999);
+    const dayStartHour = await tz.getDayStartHour();
+    const start = from ? tz.startOfDayVN(new Date(from), dayStartHour) : tz.startOfDayVN(new Date(new Date().getFullYear(), new Date().getMonth(), 1), dayStartHour);
+    const end = to ? tz.endOfDayVN(new Date(to), dayStartHour) : tz.endOfDayVN(new Date(), dayStartHour);
 
     const sessions = await prisma.session.findMany({
       where: {
