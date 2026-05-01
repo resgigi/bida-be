@@ -16,5 +16,6 @@ router.put('/:id/cancel', authorize('SUPER_ADMIN', 'MANAGER', 'CASHIER'), contro
 router.put('/:id/transfer-room', authorize('SUPER_ADMIN', 'MANAGER', 'CASHIER'), controller.transferRoom);
 router.post('/:id/request-payment', authorize('SUPER_ADMIN', 'MANAGER', 'CASHIER', 'STAFF'), controller.requestPayment);
 router.post('/:id/checkout', authorize('SUPER_ADMIN', 'MANAGER', 'CASHIER'), controller.checkout);
+router.delete('/:id', authorize('SUPER_ADMIN'), controller.deleteSession);
 
 module.exports = router;

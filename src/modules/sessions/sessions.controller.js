@@ -709,3 +709,34 @@ exports.checkout = async (req, res) => {
     return error(res, err.message);
   }
 };
+
+exports.deleteSession = async (req, res) => {
+  try {
+    const session = await prisma.session.findUnique({
+      where: { id: req.params.id },
+      include: { room: true },
+    });
+    if (!session) return error(res, 'Phiên không tồn tại', 404);
+
+    // Only allow COMPLETED, CANCELLED sessions to be deleted
+    if (session.status !== 'COMPLETED' && session.status !== 'CANCELLED') {
+      return error(res, 'Chỉ có thể xóa phiên đã thanh toán hoặc đã hủy', 400);
+    }
+
+    // Delete related order items first
+    await prisma.orderItem.deleteMany({ where: { sessionId: req.params.id } });
+
+    // Delete the session
+    await prisma.session.delete({ where: { id: req.params.id } });
+
+    await logAction(req.user.id, 'DELETE_SESSION', 'Session', req.params.id, {
+      roomName: session.room?.name,
+      status: session.status,
+      totalAmount: session.totalAmount,
+    });
+
+    return success(res, null, 'Đã xóa phiên');
+  } catch (err) {
+    return error(res, err.message);
+  }
+};

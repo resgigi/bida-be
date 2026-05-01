@@ -1,8 +1,9 @@
 {
   "name": "openbida-backend",
   "version": "1.0.0",
-  "description": "OpenBida POS - Backend API",
-  "main": "src/app.js",
+  "description": "OpenBida POS - Backend API + Desktop",
+  "author": "OpenBida",
+  "main": "electron/main.js",
   "engines": {
     "node": ">=20.0.0"
   },
@@ -13,7 +14,10 @@
     "db:push": "npx prisma db push",
     "db:seed": "node prisma/seed.js",
     "db:studio": "npx prisma studio",
-    "db:generate": "npx prisma generate"
+    "db:generate": "npx prisma generate",
+    "build:desktop": "electron-builder --win --x64",
+    "pack:desktop": "electron-builder --dir --win --x64",
+    "dev:desktop": "electron ."
   },
   "dependencies": {
     "@prisma/client": "^6.5.0",
@@ -27,8 +31,59 @@
     "zod": "^3.24.2"
   },
   "devDependencies": {
+    "electron": "^35.0.0",
+    "electron-builder": "^26.0.0",
     "nodemon": "^3.1.9",
     "pg": "^8.20.0",
     "prisma": "^6.5.0"
+  },
+  "build": {
+    "appId": "com.openbida.app",
+    "productName": "OpenBida",
+    "copyright": "Copyright © 2024 OpenBida",
+    "asar": true,
+    "directories": {
+      "output": "release",
+      "buildResources": "electron"
+    },
+    "files": [
+      "electron/**",
+      "src/**",
+      "frontend/**",
+      "prisma/**",
+      "node_modules/**",
+      "package.json",
+      ".env"
+    ],
+    "extraResources": [
+      {
+        "from": "prisma",
+        "to": "prisma",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        },
+        {
+          "target": "portable",
+          "arch": ["x64"]
+        }
+      ],
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "OpenBida"
+    },
+    "compression": "maximum"
   }
 }
