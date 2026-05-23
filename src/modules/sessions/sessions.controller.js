@@ -654,7 +654,7 @@ exports.checkout = async (req, res) => {
     });
     if (!session) return error(res, 'Phiên không tồn tại', 404);
     if (session.status === 'COMPLETED') return error(res, 'Phiên đã thanh toán', 400);
-    if (session.status !== 'PAYMENT_REQUESTED') {
+    if (session.status !== 'PAYMENT_REQUESTED' && !['SUPER_ADMIN', 'MANAGER'].includes(req.user.role)) {
       return error(res, 'Phiên chưa được yêu cầu thanh toán', 400);
     }
 
