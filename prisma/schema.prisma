@@ -99,7 +99,7 @@ model OrderItem {
   createdAt           DateTime  @default(now())
   confirmedAt         DateTime?
   confirmedByUserId   String?
-  product             Product   @relation(fields: [productId], references: [id])
+  product             Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
   session             Session   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   confirmedBy         User?     @relation("OrderItemConfirmation", fields: [confirmedByUserId], references: [id])
 }
